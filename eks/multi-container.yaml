@@ -1,0 +1,28 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: app-with-sidecar
+  labels:
+    app: multi-container-demo
+spec:
+  containers:
+  # Main application container
+  - name: app
+    image: nginx:latest
+    ports:
+    - containerPort: 80
+    volumeMounts:
+    - name: shared-logs
+      mountPath: /var/log/nginx
+
+  # Sidecar container for log processing
+  - name: log-processor
+    image: busybox:1.36
+    command: ['sh', '-c', 'tail -f /logs/access.log']
+    volumeMounts:
+    - name: shared-logs
+      mountPath: /logs
+
+  volumes:
+  - name: shared-logs
+    emptyDir: {}

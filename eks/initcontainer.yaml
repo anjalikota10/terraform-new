@@ -1,0 +1,34 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: app-with-init
+  labels:
+    app: init-demo
+spec:
+  # Init containers run before main containers
+  initContainers:
+  - name: init-database-check
+    image: busybox:1.36
+    command: ['sh', '-c', 'echo "Checking database..."; sleep 5; echo "Database ready!"']
+  
+  - name: init-config-setup
+    image: busybox:1.36
+    command: ['sh', '-c', 'echo "Setting up config..."; echo "config-data" > /work-dir/config.txt']
+    volumeMounts:
+    - name: workdir
+      mountPath: /work-dir
+  
+  # Main application container
+  containers:
+  - name: app
+    image: nginx:1.24
+    ports:
+    - containerPort: 80
+    volumeMounts:
+    - name: workdir
+      mountPath: /usr/share/nginx/html
+    command: ['sh', '-c', 'cat /usr/share/nginx/html/config.txt && nginx -g "daemon off;"']
+  
+  volumes:
+  - name: workdir
+    emptyDir: {}
