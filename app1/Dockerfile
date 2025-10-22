@@ -1,21 +1,24 @@
 # Use official PHP image with Apache
 FROM php:8.1-apache
 
+# Set working directory inside the container
+WORKDIR /var/www/html
+
 # Copy application files to the Apache root directory
 COPY . .
 
-WORKDIR /app
-
+# Install required PHP extensions
 RUN docker-php-ext-install mysqli pdo pdo_mysql
 
+# Enable Apache mod_rewrite (optional but useful for PHP apps)
+RUN a2enmod rewrite
+
+# Fix permissions
 RUN chown -R www-data:www-data /var/www/html \
     && chmod -R 755 /var/www/html
 
-# Enable Apache mod_rewrite if needed
-RUN a2enmod rewrite
-
-# Expose port 80 (Apache default)
+# Expose Apache port
 EXPOSE 80
 
-# Start Apache in the foreground
+# Start Apache in foreground
 CMD ["apache2-foreground"]

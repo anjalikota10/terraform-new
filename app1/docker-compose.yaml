@@ -1,0 +1,54 @@
+version: '3.9'
+
+services:
+  php:
+    build: .
+    container_name: php_app
+    ports:
+      - "8080:80"
+    environment:
+      - MYSQL_HOST=db
+      - MYSQL_USER=vertex
+      - MYSQL_PASSWORD=vertex123
+      - MYSQL_DATABASE=wedmegood
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: always
+    volumes:
+      - .:/var/www/html
+    networks:
+      - my_network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  db:
+    image: mysql:8.0
+    container_name: mysql_db
+    environment:
+      - MYSQL_ROOT_PASSWORD=root123
+      - MYSQL_DATABASE=wedmegood
+      - MYSQL_USER=vertex
+      - MYSQL_PASSWORD=vertex123
+    ports:
+      - "3306:3306"
+    restart: always
+    volumes:
+      - mysql_data:/var/lib/mysql
+    networks:
+      - my_network
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-proot123"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+volumes:
+  mysql_data:
+
+networks:
+  my_network:
+    driver: bridge

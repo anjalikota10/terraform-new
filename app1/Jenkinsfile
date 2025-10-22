@@ -1,0 +1,206 @@
+pipeline {
+    agent any
+    
+    environment {
+        // AWS Configuration
+        AWS_REGION = 'us-east-1'  // Change to your AWS region
+        AWS_ACCOUNT_ID = credentials('aws-cred')  // Store in Jenkins credentials
+        ECR_REGISTRY = "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
+        ECR_REPOSITORY = 'php-app'  // Your ECR repository name
+        
+        // Image Configuration
+        IMAGE_TAG = "${BUILD_NUMBER}"
+        IMAGE_NAME = "${ECR_REGISTRY}/${ECR_REPOSITORY}:${IMAGE_TAG}"
+        LATEST_IMAGE = "${ECR_REGISTRY}/${ECR_REPOSITORY}:latest"
+        
+        // EC2 Configuration
+        EC2_HOST = '44.201.239.138'
+        EC2_USER = 'ec2-user'  // or 'ubuntu' depending on your AMI
+        EC2_SSH_KEY = credentials('ec2-ssh-key')  // Store SSH key in Jenkins credentials
+        APP_PATH = '/var/www/html/terraform-new/app1'
+        
+        // Git Configuration
+        GIT_BRANCH = 'main'  // Change to your branch
+    }
+    
+    options {
+        buildDiscarder(logRotator(numToKeepStr: '10'))
+        timestamps()
+        timeout(time: 30, unit: 'MINUTES')
+    }
+    
+    stages {
+        stage('Checkout') {
+            steps {
+                checkout scm
+                script {
+                    COMMIT_DATE = sh(returnStdout: true, script: "git show -s --format=%ci ${GIT_COMMIT}").trim()
+                    COMMIT_SHORT = sh(returnStdout: true, script: "git rev-parse --short HEAD").trim()
+                }
+                echo "Commit Date: ${COMMIT_DATE}"
+                echo "Commit Hash: ${COMMIT_SHORT}"
+                sh script: 'git rev-parse --abbrev-ref HEAD'
+            }
+        }
+        
+        stage('Build & Push to ECR') {
+            steps {
+                script {
+                    echo "Starting build and push process..."
+                    
+                    // Authenticate with ECR
+                    echo "Authenticating with AWS ECR..."
+                    sh """
+                        aws ecr get-login-password --region ${AWS_REGION} | \
+                        docker login --username AWS --password-stdin ${ECR_REGISTRY}
+                    """
+                    
+                    // Build Docker image
+                    echo "Building Docker image..."
+                    sh """
+                        docker build \
+                            --build-arg BUILD_DATE=\$(date -u +'%Y-%m-%dT%H:%M:%SZ') \
+                            --build-arg VCS_REF=${COMMIT_SHORT} \
+                            --build-arg BUILD_NUMBER=${BUILD_NUMBER} \
+                            -t ${IMAGE_NAME} \
+                            -t ${LATEST_IMAGE} \
+                            .
+                    """
+                    
+                    echo "Docker image built successfully"
+                    
+                    // Push both tagged and latest images
+                    echo "Pushing images to ECR..."
+                    sh """
+                        echo "Pushing image with tag: ${IMAGE_TAG}"
+                        docker push ${IMAGE_NAME}
+                        
+                        echo "Pushing image with tag: latest"
+                        docker push ${LATEST_IMAGE}
+                    """
+                    
+                    echo "Images pushed to ECR successfully"
+                    echo "Image: ${IMAGE_NAME}"
+                }
+            }
+        }
+        
+        stage('Deploy to EC2') {
+            steps {
+                script {
+                    echo "Deploying to EC2 instance: ${EC2_HOST}..."
+                    
+                    // Create deployment script
+                    def deployScript = """
+                        set -e
+                        
+                        echo "Authenticating with AWS ECR..."
+                        aws ecr get-login-password --region ${AWS_REGION} | \
+                        docker login --username AWS --password-stdin ${ECR_REGISTRY}
+                        
+                        echo "Navigating to application directory..."
+                        cd ${APP_PATH}
+                        
+                        echo "Stopping existing containers..."
+                        docker-compose down || true
+                        
+                        echo "Cleaning up old images..."
+                        docker image prune -f
+                        
+                        echo "Pulling latest image from ECR..."
+                        docker pull ${IMAGE_NAME}
+                        
+                        echo "Tagging image for docker-compose..."
+                        docker tag ${IMAGE_NAME} php-app:latest
+                        
+                        echo "Starting containers with docker-compose..."
+                        docker-compose up -d
+                        
+                        echo "Waiting for services to be healthy..."
+                        sleep 10
+                        
+                        echo "Checking container status..."
+                        docker-compose ps
+                        
+                        echo "Running health check..."
+                        for i in {1..30}; do
+                            if curl -f http://localhost:8080/ >/dev/null 2>&1; then
+                                echo "Application is healthy!"
+                                exit 0
+                            fi
+                            echo "Waiting for application to be ready... (\$i/30)"
+                            sleep 2
+                        done
+                        
+                        echo "Health check failed!"
+                        docker-compose logs
+                        exit 1
+                    """
+                    
+                    // Execute deployment via SSH
+                    sshagent(credentials: ["${EC2_SSH_KEY}"]) {
+                        sh """
+                            ssh -o StrictHostKeyChecking=no \
+                                -o UserKnownHostsFile=/dev/null \
+                                ${EC2_USER}@${EC2_HOST} \
+                                'bash -s' << 'ENDSSH'
+${deployScript}
+ENDSSH
+                        """
+                    }
+                    
+                    echo "Deployment completed successfully!"
+                }
+            }
+    }
+    
+    post {
+        success {
+            echo """
+            ====================================
+            DEPLOYMENT SUCCESSFUL!
+            ====================================
+            Image: ${IMAGE_NAME}
+            Application URL: http://${EC2_HOST}:8080
+            Build: #${BUILD_NUMBER}
+            Commit: ${COMMIT_SHORT}
+            ====================================
+            """
+            
+            // Optional: Send notification (configure your notification method)
+            // emailext(
+            //     subject: "Deployment Successful - Build #${BUILD_NUMBER}",
+            //     body: "Application deployed successfully to ${EC2_HOST}",
+            //     to: 'team@example.com'
+            // )
+        }
+        
+        failure {
+            echo """
+            ====================================
+            DEPLOYMENT FAILED!
+            ====================================
+            Build: #${BUILD_NUMBER}
+            Commit: ${COMMIT_SHORT}
+            ====================================
+            """
+            
+            // Optional: Send notification
+            // emailext(
+            //     subject: "Deployment Failed - Build #${BUILD_NUMBER}",
+            //     body: "Application deployment failed. Check Jenkins logs.",
+            //     to: 'team@example.com'
+            // )
+        }
+        
+        always {
+            echo "Cleaning up local Docker images..."
+            sh """
+                docker rmi ${IMAGE_NAME} || true
+                docker rmi ${LATEST_IMAGE} || true
+                docker image prune -f || true
+            """
+        }
+    }
+}
+
