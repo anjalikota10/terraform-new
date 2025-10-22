@@ -6,7 +6,7 @@ pipeline {
         AWS_REGION = 'us-east-1'  // Change to your AWS region
         AWS_ACCOUNT_ID = credentials('aws-cred')  // Store in Jenkins credentials
         ECR_REGISTRY = "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
-        ECR_REPOSITORY = 'php-app'  // Your ECR repository name
+        ECR_REPOSITORY = 'php-eks'  // Your ECR repository name
         
         // Image Configuration
         IMAGE_TAG = "${BUILD_NUMBER}"
@@ -15,12 +15,12 @@ pipeline {
         
         // EC2 Configuration
         EC2_HOST = '44.201.239.138'
-        EC2_USER = 'ec2-user'  // or 'ubuntu' depending on your AMI
-        EC2_SSH_KEY = credentials('ec2-ssh-key')  // Store SSH key in Jenkins credentials
+        EC2_USER = 'ubuntu'  // or 'ubuntu' depending on your AMI
+        EC2_SSH_KEY = credentials('ec2-ssh')  // Store SSH key in Jenkins credentials
         APP_PATH = '/var/www/html/terraform-new/app1'
         
         // Git Configuration
-        GIT_BRANCH = 'main'  // Change to your branch
+        GIT_BRANCH = 'origin/terraform'  // Change to your branch
     }
     
     options {
@@ -152,6 +152,7 @@ ENDSSH
                     echo "Deployment completed successfully!"
                 }
             }
+        }
     }
     
     post {
@@ -203,4 +204,3 @@ ENDSSH
         }
     }
 }
-
