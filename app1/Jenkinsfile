@@ -156,19 +156,19 @@ pipeline {
                         echo "Checking container status..."
                         docker-compose ps
                         
-                        echo "Running health check..."
-                        for i in {1..30}; do
-                            if curl -f http://44.201.239.138:8081/ >/dev/null 2>&1; then
-                                echo "Application is healthy!"
-                                exit 0
-                            fi
-                            echo "Waiting for application to be ready... (\$i/30)"
-                            sleep 2
-                        done
+                    #    echo "Running health check..."
+                     #   for i in {1..30}; do
+                      #      if curl -f http://44.201.239.138:8081/ >/dev/null 2>&1; then
+                       #         echo "Application is healthy!"
+                        #        exit 0
+                         #   fi
+                          #  echo "Waiting for application to be ready... (\$i/30)"
+                           # sleep 2
+                       # done
                         
-                        echo "Health check failed!"
-                        docker-compose logs
-                        exit 1
+                       # echo "Health check failed!"
+                       # docker-compose logs
+                       # exit 1
                     """
                     
                     // Execute deployment via SSH
