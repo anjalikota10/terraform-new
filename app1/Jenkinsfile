@@ -3,24 +3,19 @@ pipeline {
     
     environment {
         // AWS Configuration
-        AWS_REGION = 'us-east-1'  // Change to your AWS region
-        AWS_ACCOUNT_ID = credentials('aws-cred')  // Store in Jenkins credentials
-        ECR_REGISTRY = "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
-        ECR_REPOSITORY = 'php-eks'  // Your ECR repository name
+        AWS_REGION = 'us-east-1'
+        ECR_REPOSITORY = 'php-eks'
         
         // Image Configuration
         IMAGE_TAG = "${BUILD_NUMBER}"
-        IMAGE_NAME = "${ECR_REGISTRY}/${ECR_REPOSITORY}:${IMAGE_TAG}"
-        LATEST_IMAGE = "${ECR_REGISTRY}/${ECR_REPOSITORY}:latest"
         
         // EC2 Configuration
         EC2_HOST = '44.201.239.138'
-        EC2_USER = 'ubuntu'  // or 'ubuntu' depending on your AMI
-        EC2_SSH_KEY = credentials('ec2-ssh')  // Store SSH key in Jenkins credentials
+        EC2_USER = 'ubuntu'
         APP_PATH = '/var/www/html/terraform-new/app1'
         
         // Git Configuration
-        GIT_BRANCH = 'origin/terraform'  // Change to your branch
+        GIT_BRANCH = 'origin/terraform'
     }
     
     options {
@@ -34,11 +29,11 @@ pipeline {
             steps {
                 checkout scm
                 script {
-                    COMMIT_DATE = sh(returnStdout: true, script: "git show -s --format=%ci ${GIT_COMMIT}").trim()
-                    COMMIT_SHORT = sh(returnStdout: true, script: "git rev-parse --short HEAD").trim()
+                    env.COMMIT_DATE = sh(returnStdout: true, script: "git show -s --format=%ci ${GIT_COMMIT}").trim()
+                    env.COMMIT_SHORT = sh(returnStdout: true, script: "git rev-parse --short HEAD").trim()
                 }
-                echo "Commit Date: ${COMMIT_DATE}"
-                echo "Commit Hash: ${COMMIT_SHORT}"
+                echo "Commit Date: ${env.COMMIT_DATE}"
+                echo "Commit Hash: ${env.COMMIT_SHORT}"
                 sh script: 'git rev-parse --abbrev-ref HEAD'
             }
         }
@@ -48,39 +43,60 @@ pipeline {
                 script {
                     echo "Starting build and push process..."
                     
-                    // Authenticate with ECR
-                    echo "Authenticating with AWS ECR..."
-                    sh """
-                        aws ecr get-login-password --region ${AWS_REGION} | \
-                        docker login --username AWS --password-stdin ${ECR_REGISTRY}
-                    """
-                    
-                    // Build Docker image
-                    echo "Building Docker image..."
-                    sh """
-                        docker build \
-                            --build-arg BUILD_DATE=\$(date -u +'%Y-%m-%dT%H:%M:%SZ') \
-                            --build-arg VCS_REF=${COMMIT_SHORT} \
-                            --build-arg BUILD_NUMBER=${BUILD_NUMBER} \
-                            -t ${IMAGE_NAME} \
-                            -t ${LATEST_IMAGE} \
-                            .
-                    """
-                    
-                    echo "Docker image built successfully"
-                    
-                    // Push both tagged and latest images
-                    echo "Pushing images to ECR..."
-                    sh """
-                        echo "Pushing image with tag: ${IMAGE_TAG}"
-                        docker push ${IMAGE_NAME}
+                    // Use AWS credentials binding to get account ID dynamically
+                    withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: 'aws-cred']]) {
+                        // Get AWS Account ID dynamically
+                        def AWS_ACCOUNT_ID = sh(
+                            returnStdout: true, 
+                            script: 'aws sts get-caller-identity --query Account --output text'
+                        ).trim()
                         
-                        echo "Pushing image with tag: latest"
-                        docker push ${LATEST_IMAGE}
-                    """
-                    
-                    echo "Images pushed to ECR successfully"
-                    echo "Image: ${IMAGE_NAME}"
+                        def ECR_REGISTRY = "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
+                        def IMAGE_NAME = "${ECR_REGISTRY}/${ECR_REPOSITORY}:${IMAGE_TAG}"
+                        def LATEST_IMAGE = "${ECR_REGISTRY}/${ECR_REPOSITORY}:latest"
+                        
+                        echo "AWS Account ID: ${AWS_ACCOUNT_ID}"
+                        echo "ECR Registry: ${ECR_REGISTRY}"
+                        
+                        // Authenticate with ECR
+                        echo "Authenticating with AWS ECR..."
+                        sh """
+                            aws ecr get-login-password --region ${AWS_REGION} | \
+                            docker login --username AWS --password-stdin ${ECR_REGISTRY}
+                        """
+                        
+                        // Build Docker image
+                        echo "Building Docker image..."
+                        sh """
+                            docker build \
+                                --build-arg BUILD_DATE=\$(date -u +'%Y-%m-%dT%H:%M:%SZ') \
+                                --build-arg VCS_REF=${env.COMMIT_SHORT} \
+                                --build-arg BUILD_NUMBER=${BUILD_NUMBER} \
+                                -t ${IMAGE_NAME} \
+                                -t ${LATEST_IMAGE} \
+                                .
+                        """
+                        
+                        echo "Docker image built successfully"
+                        
+                        // Push both tagged and latest images
+                        echo "Pushing images to ECR..."
+                        sh """
+                            echo "Pushing image with tag: ${IMAGE_TAG}"
+                            docker push ${IMAGE_NAME}
+                            
+                            echo "Pushing image with tag: latest"
+                            docker push ${LATEST_IMAGE}
+                        """
+                        
+                        echo "Images pushed to ECR successfully"
+                        echo "Image: ${IMAGE_NAME}"
+                        
+                        // Store for later stages
+                        env.ECR_REGISTRY = ECR_REGISTRY
+                        env.IMAGE_NAME = IMAGE_NAME
+                        env.LATEST_IMAGE = LATEST_IMAGE
+                    }
                 }
             }
         }
@@ -96,7 +112,7 @@ pipeline {
                         
                         echo "Authenticating with AWS ECR..."
                         aws ecr get-login-password --region ${AWS_REGION} | \
-                        docker login --username AWS --password-stdin ${ECR_REGISTRY}
+                        docker login --username AWS --password-stdin ${env.ECR_REGISTRY}
                         
                         echo "Navigating to application directory..."
                         cd ${APP_PATH}
@@ -108,10 +124,10 @@ pipeline {
                         docker image prune -f
                         
                         echo "Pulling latest image from ECR..."
-                        docker pull ${IMAGE_NAME}
+                        docker pull ${env.LATEST_IMAGE}
                         
                         echo "Tagging image for docker-compose..."
-                        docker tag ${IMAGE_NAME} php-app:latest
+                        docker tag ${env.LATEST_IMAGE} php-app:latest
                         
                         echo "Starting containers with docker-compose..."
                         docker-compose up -d
@@ -138,7 +154,7 @@ pipeline {
                     """
                     
                     // Execute deployment via SSH
-                    sshagent(credentials: ["${EC2_SSH_KEY}"]) {
+                    sshagent(credentials: ['ec2-ssh']) {
                         sh """
                             ssh -o StrictHostKeyChecking=no \
                                 -o UserKnownHostsFile=/dev/null \
@@ -161,19 +177,12 @@ ENDSSH
             ====================================
             DEPLOYMENT SUCCESSFUL!
             ====================================
-            Image: ${IMAGE_NAME}
+            Image: ${env.IMAGE_NAME}
             Application URL: http://${EC2_HOST}:8080
             Build: #${BUILD_NUMBER}
-            Commit: ${COMMIT_SHORT}
+            Commit: ${env.COMMIT_SHORT}
             ====================================
             """
-            
-            // Optional: Send notification (configure your notification method)
-            // emailext(
-            //     subject: "Deployment Successful - Build #${BUILD_NUMBER}",
-            //     body: "Application deployed successfully to ${EC2_HOST}",
-            //     to: 'team@example.com'
-            // )
         }
         
         failure {
@@ -182,25 +191,22 @@ ENDSSH
             DEPLOYMENT FAILED!
             ====================================
             Build: #${BUILD_NUMBER}
-            Commit: ${COMMIT_SHORT}
+            Commit: ${env.COMMIT_SHORT}
             ====================================
             """
-            
-            // Optional: Send notification
-            // emailext(
-            //     subject: "Deployment Failed - Build #${BUILD_NUMBER}",
-            //     body: "Application deployment failed. Check Jenkins logs.",
-            //     to: 'team@example.com'
-            // )
         }
         
         always {
-            echo "Cleaning up local Docker images..."
-            sh """
-                docker rmi ${IMAGE_NAME} || true
-                docker rmi ${LATEST_IMAGE} || true
-                docker image prune -f || true
-            """
+            script {
+                if (env.IMAGE_NAME) {
+                    echo "Cleaning up local Docker images..."
+                    sh """
+                        docker rmi ${env.IMAGE_NAME} || true
+                        docker rmi ${env.LATEST_IMAGE} || true
+                        docker image prune -f || true
+                    """
+                }
+            }
         }
     }
 }
