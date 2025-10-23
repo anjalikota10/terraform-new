@@ -9,6 +9,10 @@ pipeline {
         // Image Configuration
         IMAGE_TAG = "${BUILD_NUMBER}"
         
+        // Build Configuration
+        DOCKERFILE_PATH = 'app1/Dockerfile'
+        BUILD_CONTEXT = 'app1'
+        
         // EC2 Configuration
         EC2_HOST = '44.201.239.138'
         EC2_USER = 'ubuntu'
@@ -67,14 +71,28 @@ pipeline {
                         
                         // Build Docker image
                         echo "Building Docker image..."
+                        
+                        // List files for debugging
+                        echo "Current directory contents:"
+                        sh 'ls -la'
+                        sh 'pwd'
+                        
+                        // Check if Dockerfile exists
+                        if (fileExists(DOCKERFILE_PATH)) {
+                            echo "Dockerfile found at: ${DOCKERFILE_PATH}"
+                        } else {
+                            error "Dockerfile not found at: ${DOCKERFILE_PATH}"
+                        }
+                        
                         sh """
                             docker build \
+                                -f ${DOCKERFILE_PATH} \
                                 --build-arg BUILD_DATE=\$(date -u +'%Y-%m-%dT%H:%M:%SZ') \
                                 --build-arg VCS_REF=${env.COMMIT_SHORT} \
                                 --build-arg BUILD_NUMBER=${BUILD_NUMBER} \
                                 -t ${IMAGE_NAME} \
                                 -t ${LATEST_IMAGE} \
-                                .
+                                ${BUILD_CONTEXT}
                         """
                         
                         echo "Docker image built successfully"
