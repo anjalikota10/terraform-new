@@ -158,7 +158,7 @@ pipeline {
                         
                         echo "Running health check..."
                         for i in {1..30}; do
-                            if curl -f http://localhost:8080/ >/dev/null 2>&1; then
+                            if curl -f http://44.201.239.138:8081/ >/dev/null 2>&1; then
                                 echo "Application is healthy!"
                                 exit 0
                             fi
