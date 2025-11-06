@@ -1,0 +1,22 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: nginx-deamonset
+  namespace: dev
+  labels:
+     app: daemonset
+spec:
+  selector:
+      matchLabels:
+        app: daemonset
+  template:
+      metadata:
+         labels:
+            app: daemonset
+      spec:
+        containers:
+          - name: node-exporter
+            image: prom/node-exporter:v1.8.1
+            ports:
+              - containerPort: 9100
+                name: exporter
